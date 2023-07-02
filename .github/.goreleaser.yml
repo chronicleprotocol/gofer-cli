@@ -1,0 +1,21 @@
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/gofer
+    id: "gofer"
+    binary: gofer
+    goos:
+      - linux
+      - darwin
+archives:
+  -
+    id: "gofer"
+    builds:
+      - gofer
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
