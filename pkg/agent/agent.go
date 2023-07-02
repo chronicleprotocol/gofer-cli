@@ -35,8 +35,6 @@ type HTTPAgentConfig struct {
 	Logger        log.Logger
 	// Address is used for the rpc.Listener function.
 	Address string
-	// Interval is the interval at which to publish prices in seconds.
-	//Interval uint32 `hcl:"interval"`
 }
 
 // HTTPAgent returns the services that are configured from the Config struct.
@@ -147,12 +145,7 @@ func (s *HTTPAgent) handlePrices(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"error":"failed to check prices"}`)
 		return
 	}
-	//b, err := json.Marshal(prices)
-	//if err != nil {
-	//	s.log.Errorf("failed to marshal response: %v", err)
-	//	_, _ = io.WriteString(w, `{"error":"failed to marshal json"}`)
-	//	return
-	//}
+
 	for _, p := range prices {
 		if mErr := s.marshaller.Write(w, p); mErr != nil {
 			_ = s.marshaller.Write(w, mErr)

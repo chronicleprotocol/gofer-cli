@@ -114,17 +114,6 @@ func (g *Cache) update(pair provider.Pair) error {
 	price := &median.Price{Wat: pair.Base + pair.Quote, Age: tick.Time}
 	price.SetFloat64Price(tick.Price)
 
-	// Broadcast price to P2P network.
-	//msg, err := toPriceMessage(price, tick)
-	//if err != nil {
-	//	return err
-	//}
-	//if err := g.transport.Broadcast(messages.PriceV0MessageName, msg.AsV0()); err != nil {
-	//	return err
-	//}
-	//if err := g.transport.Broadcast(messages.PriceV1MessageName, msg.AsV1()); err != nil {
-	//	return err
-	//}
 	return err
 }
 
