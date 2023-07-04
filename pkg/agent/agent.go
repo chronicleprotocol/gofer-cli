@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/chronicleprotocol/oracle-suite/pkg/log"
 	"github.com/chronicleprotocol/oracle-suite/pkg/price/provider"
@@ -50,8 +51,46 @@ type HTTPAgent struct {
 	log           log.Logger
 }
 
-type priceRequest struct {
+type pricesRequest struct {
 	Pairs []provider.Pair
+}
+
+type priceRequest struct {
+	Pair provider.Pair
+}
+
+type jsonPrice struct {
+	Type       string            `json:"type"`
+	Base       string            `json:"base"`
+	Quote      string            `json:"quote"`
+	Price      float64           `json:"price"`
+	Bid        float64           `json:"bid"`
+	Ask        float64           `json:"ask"`
+	Volume24h  float64           `json:"vol24h"`
+	Timestamp  time.Time         `json:"ts"`
+	Parameters map[string]string `json:"params,omitempty"`
+	Prices     []jsonPrice       `json:"prices,omitempty"`
+	Error      string            `json:"error,omitempty"`
+}
+
+func jsonPriceFromGoferPrice(t *provider.Price) jsonPrice {
+	var prices []jsonPrice
+	for _, c := range t.Prices {
+		prices = append(prices, jsonPriceFromGoferPrice(c))
+	}
+	return jsonPrice{
+		Type:       t.Type,
+		Base:       t.Pair.Base,
+		Quote:      t.Pair.Quote,
+		Price:      t.Price,
+		Bid:        t.Bid,
+		Ask:        t.Ask,
+		Volume24h:  t.Volume24h,
+		Timestamp:  t.Time.In(time.UTC),
+		Parameters: t.Parameters,
+		Prices:     prices,
+		Error:      t.Error,
+	}
 }
 
 func NewHTTPAgent(cfg HTTPAgentConfig) *HTTPAgent {
@@ -99,10 +138,10 @@ func (s *HTTPAgent) Wait() <-chan error {
 }
 
 func (s *HTTPAgent) initServer() error {
-
 	s.log.Infof("initializing HTTP server on %s", s.address)
 
 	http.HandleFunc("/", s.handlePrices)
+	http.HandleFunc("/price", s.handlePrice)
 	http.HandleFunc("/prices", s.handlePrices)
 
 	return nil
@@ -115,7 +154,7 @@ func (s *HTTPAgent) contextCancelHandler() {
 	s.waitCh <- s.server.Close()
 }
 
-func (s *HTTPAgent) handlePrices(w http.ResponseWriter, r *http.Request) {
+func (s *HTTPAgent) handlePrice(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		msg := "Content-Type header is not application/json"
 		http.Error(w, msg, http.StatusUnsupportedMediaType)
@@ -123,6 +162,52 @@ func (s *HTTPAgent) handlePrices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p priceRequest
+	err := json.NewDecoder(r.Body).Decode(&p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if p.Pair.Empty() {
+		_, _ = io.WriteString(w, "{}")
+		return
+	}
+
+	prices, err := s.priceProvider.Prices(p.Pair)
+	if err != nil {
+		s.log.Errorf("failed to get prices: %v", err)
+		_, _ = io.WriteString(w, `{"error":"failed to get prices"}`)
+		return
+	}
+	err = s.priceHook.Check(prices)
+	if err != nil {
+		s.log.Errorf("failed to check prices: %v", err)
+		_, _ = io.WriteString(w, `{"error":"failed to check prices"}`)
+		return
+	}
+	price, ok := prices[p.Pair]
+	if !ok {
+		s.log.Infof("Invalid price response for %s: %v", p.Pair.String(), prices)
+		_, _ = io.WriteString(w, "{}")
+		return
+	}
+
+	b, err := json.Marshal(jsonPriceFromGoferPrice(price))
+	if err != nil {
+		s.log.Infof("Failed to get price for %s: %v", p.Pair.String(), err)
+		_, _ = io.WriteString(w, "{}")
+		return
+	}
+	_, _ = io.WriteString(w, string(b))
+}
+
+func (s *HTTPAgent) handlePrices(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		msg := "Content-Type header is not application/json"
+		http.Error(w, msg, http.StatusUnsupportedMediaType)
+		return
+	}
+
+	var p pricesRequest
 	err := json.NewDecoder(r.Body).Decode(&p)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
